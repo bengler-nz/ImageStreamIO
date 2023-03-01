@@ -1223,7 +1223,7 @@ PYBIND11_MODULE(ImageStreamIOWrap, m) {
         py::arg("index"))
 
       .def(
-        "gpu_buffer",
+        "as_cp",
         [](IMAGE &img) {
           if (img.array.raw == nullptr) {
             throw std::runtime_error("image not initialized");
