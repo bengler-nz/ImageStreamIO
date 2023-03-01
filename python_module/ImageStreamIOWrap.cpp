@@ -10,6 +10,21 @@
 
 namespace py = pybind11;
 
+
+inline py::module_& cupy_module() {
+  static py::module_ cupy(py::module_::import("cupy"));
+  return cupy;
+}
+
+inline py::module_& cuda_module() {
+  static py::module_ cuda(cupy_module().attr("cuda"));
+  return cuda;
+}
+
+
+
+
+
 std::string toString(const IMAGE_KEYWORD &kw) {
   std::ostringstream tmp_str;
   //  tmp_str << kw.name << ": ";
@@ -162,6 +177,43 @@ ImageStreamIODataType PyFormatToImageStreamIODataType(const std::string &pf) {
   // py::format_descriptor<(std::complex<double>>::format();
   throw std::runtime_error("Not implemented");
 }
+
+
+template <typename T>
+py::object to_cp_array(const IMAGE &img) {
+  using namespace py::literals; // to bring in the `_a` literal 
+
+  ImageStreamIODataType dt(img.md->datatype);
+  std::vector<ssize_t> shape(img.md->naxis);
+  std::vector<ssize_t> strides(img.md->naxis);
+  ssize_t stride = dt.asize;
+
+  // Row Major representation
+  // for (int8_t axis(img.md->naxis-1); axis >= 0; --axis) {
+  // Col Major representation
+  for (int8_t axis(0); axis < img.md->naxis; ++axis) {
+      shape[axis] = img.md->size[axis];
+      strides[axis] = stride;
+      stride *= shape[axis];
+
+    }
+  auto i_ptr = reinterpret_cast<std::uintptr_t>(img.array.raw);
+  auto memory_size = 1;
+  for(std::size_t i = 0; i < shape.size(); ++i)
+      memory_size += (shape[i] - 1) * strides[i];
+
+  auto & cuda = cuda_module();
+  auto memory     = cuda.attr("UnownedMemory")(i_ptr, memory_size * ImageStreamIO_typesize(img.md->datatype), 0, img.md->location);
+  auto memory_ptr = cuda.attr("MemoryPointer")(memory, 0);
+
+  return cupy_module().attr("ndarray")(
+    "memptr"_a=memory_ptr,
+    "dtype"_a=pybind11::dtype::of<T>(),
+    "shape"_a=py::cast(shape),
+    "strides"_a=py::cast(strides)
+    );
+}
+
 
 template <typename T>
 py::array_t<T> convert_img(const IMAGE &img) {
@@ -1173,6 +1225,60 @@ PYBIND11_MODULE(ImageStreamIOWrap, m) {
               Return:
                   ret    [out]: error code
               )pbdoc",
-        py::arg("index"));
+        py::arg("index"))
+
+      .def(
+        "gpu_buffer",
+        [](IMAGE &img) {
+          if (img.array.raw == nullptr) {
+            throw std::runtime_error("image not initialized");
+          }
+          if (img.md->location == -1) {
+            throw std::runtime_error(
+              "unsupported location, only available on GPU SHMs");
+              
+          } else {
+            #ifndef HAVE_CUDA
+              throw std::runtime_error(
+              "unsupported location, CACAO needs to be compiled with -DUSE_CUDA=ON");
+            #endif
+          }
+
+          ImageStreamIODataType dt(img.md->datatype);
+          switch (dt.datatype) {
+               case ImageStreamIODataType::DataType::UINT8:
+                return(to_cp_array<uint8_t>(img));
+               case ImageStreamIODataType::DataType::INT8:
+                 return(to_cp_array<int8_t>(img));
+               case ImageStreamIODataType::DataType::UINT16:
+                 return(to_cp_array<uint16_t>(img));
+               case ImageStreamIODataType::DataType::INT16:
+                 return(to_cp_array<int16_t>(img));
+               case ImageStreamIODataType::DataType::UINT32:
+                 return(to_cp_array<uint32_t>(img));
+               case ImageStreamIODataType::DataType::INT32:
+                 return(to_cp_array<int32_t>(img));
+               case ImageStreamIODataType::DataType::UINT64:
+                 return(to_cp_array<uint64_t>(img));
+               case ImageStreamIODataType::DataType::INT64:
+                 return(to_cp_array<int64_t>(img));
+               case ImageStreamIODataType::DataType::FLOAT:
+                 return(to_cp_array<float>(img));
+               case ImageStreamIODataType::DataType::DOUBLE:
+                 return(to_cp_array<double>(img));
+               // case ImageStreamIODataType::DataType::COMPLEX_FLOAT: return ;
+               // case ImageStreamIODataType::DataType::COMPLEX_DOUBLE: return ;
+               default:
+                 throw std::runtime_error("Not implemented");
+             }
+        },
+        R"pbdoc(
+              CuPy view of GPU buffer
+              
+              Return:
+                  ret    [out]: CuPy ndarray view of SHM
+              )pbdoc"
+              );
+
 }
 
