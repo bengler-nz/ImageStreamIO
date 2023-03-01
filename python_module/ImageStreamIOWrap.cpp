@@ -8,21 +8,16 @@
 #include "ImageStreamIO.h"
 #include "ImageStruct.h"
 
-namespace py = pybind11;
 
-
-inline py::module_& cupy_module() {
-  static py::module_ cupy(py::module_::import("cupy"));
+inline pybind11::module_& cupy_module() {
+  static pybind11::module_ cupy(py::module_::import("cupy"));
   return cupy;
 }
 
-inline py::module_& cuda_module() {
-  static py::module_ cuda(cupy_module().attr("cuda"));
+inline pybind11::module_& cuda_module() {
+  static pybind11::module_ cuda(cupy_module().attr("cuda"));
   return cuda;
 }
-
-
-
 
 
 std::string toString(const IMAGE_KEYWORD &kw) {
